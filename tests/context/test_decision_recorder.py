@@ -310,6 +310,48 @@ class TestDecisionRecorder:
         assert params["approval_id"] == approval.approval_id
         assert params["decision_id"] == approval.decision_id
     
+
+
+    def test_store_decision_node_serializes_metadata_json(self, decision_recorder, mock_graph_store):
+        """Test nested metadata is serialized for graph-safe persistence."""
+        decision = Decision(
+            decision_id="test_nested_001",
+            category="credit_approval",
+            scenario="Nested metadata scenario",
+            reasoning="Reasoning",
+            outcome="approved",
+            confidence=0.9,
+            timestamp=datetime.now(),
+            decision_maker="agent",
+            metadata={"nested": {"risk": "low"}, "scores": [1, 2, 3]}
+        )
+
+        decision_recorder._store_decision_node(decision)
+
+        params = mock_graph_store.execute_query.call_args[0][1]
+        assert params["metadata_json"] == '{"nested": {"risk": "low"}, "scores": [1, 2, 3]}'
+
+    def test_store_decision_node_raises_for_unsupported_metadata(self, decision_recorder):
+        """Test unsupported metadata values raise a clear validation error."""
+
+        class Unserializable:
+            pass
+
+        decision = Decision(
+            decision_id="test_invalid_meta",
+            category="credit_approval",
+            scenario="Invalid metadata scenario",
+            reasoning="Reasoning",
+            outcome="approved",
+            confidence=0.9,
+            timestamp=datetime.now(),
+            decision_maker="agent",
+            metadata={"bad": Unserializable()}
+        )
+
+        with pytest.raises(ValueError, match="unsupported value types"):
+            decision_recorder._store_decision_node(decision)
+
     def test_track_decision_provenance(self, decision_recorder, mock_provenance_manager, sample_decision):
         """Test decision provenance tracking."""
         source_documents = ["doc_001", "doc_002"]
