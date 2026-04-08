@@ -72,6 +72,7 @@ Production Use Cases:
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
+import json
 import uuid
 
 from ..embeddings import EmbeddingGenerator
@@ -466,6 +467,23 @@ class DecisionRecorder:
             self.logger.exception("Failed to link precedents")
             raise
     
+
+    def _normalize_metadata_for_storage(self, metadata: Optional[Dict[str, Any]]) -> str:
+        """Serialize decision metadata to a JSON string for graph property safety."""
+        metadata = metadata or {}
+
+        def _json_default(value: Any) -> Any:
+            if isinstance(value, datetime):
+                return value.isoformat()
+            raise TypeError(f"Unsupported metadata value type: {type(value).__name__}")
+
+        try:
+            return json.dumps(metadata, default=_json_default)
+        except TypeError as exc:
+            raise ValueError(
+                f"Decision metadata contains unsupported value types: {exc}"
+            ) from exc
+
     def _store_decision_node(self, decision: Decision) -> None:
         """Store decision node in graph database."""
         metadata = decision.metadata.copy() if decision.metadata else {}
@@ -489,6 +507,8 @@ class DecisionRecorder:
             )
             return
 
+        metadata_json = self._normalize_metadata_for_storage(decision.metadata)
+
         query = """
         CREATE (d:Decision {
             decision_id: $decision_id,
@@ -501,7 +521,8 @@ class DecisionRecorder:
             decision_maker: $decision_maker,
             reasoning_embedding: $reasoning_embedding,
             node2vec_embedding: $node2vec_embedding,
-            metadata: $metadata
+            metadata: $metadata_json,
+            metadata_json: $metadata_json
         })
         """
         self.graph_store.execute_query(query, {
@@ -515,7 +536,7 @@ class DecisionRecorder:
             "decision_maker": decision.decision_maker,
             "reasoning_embedding": decision.reasoning_embedding,
             "node2vec_embedding": decision.node2vec_embedding,
-            "metadata": decision.metadata
+            "metadata_json": metadata_json,
         })
     
     def _store_exception_node(self, exception: PolicyException) -> None:
